@@ -49,6 +49,7 @@ class WorldModel(nn.Module):
                 max_seg_len=config.vta_max_seg_len,
                 max_seg_num=config.vta_max_seg_num,
                 boundary_temp=config.vta_boundary_temp,
+                boundary_force_scale=config.vta_boundary_force_scale,
                 act=config.act,
                 norm=config.norm,
                 min_std=config.dyn_min_std,
@@ -149,6 +150,21 @@ class WorldModel(nn.Module):
                     post, prior, kl_free, dyn_scale, rep_scale
                 )
                 assert kl_loss.shape == embed.shape[:2], kl_loss.shape
+                boundary_reg = 0.0
+                boundary_kl = None
+                if self._dynamics_type == 'vta':
+                    rate = getattr(self._config, "vta_boundary_rate", 0.0)
+                    scale = getattr(self._config, "vta_boundary_scale", 0.0)
+                    if scale and rate > 0:
+                        probs = torch.softmax(post["boundary_logit"], dim=-1)[..., 0]
+                        target = torch.full_like(probs, float(rate))
+                        eps = 1e-6
+                        boundary_kl = probs * (
+                            torch.log(probs + eps) - torch.log(target + eps)
+                        ) + (1.0 - probs) * (
+                            torch.log(1.0 - probs + eps) - torch.log(1.0 - target + eps)
+                        )
+                        boundary_reg = scale * boundary_kl
                 preds = {}
                 for name, head in self.heads.items():
                     grad_head = name in self._config.grad_heads
@@ -169,6 +185,8 @@ class WorldModel(nn.Module):
                     for key, value in losses.items()
                 }
                 model_loss = sum(scaled.values()) + kl_loss
+                if boundary_kl is not None:
+                    model_loss = model_loss + boundary_reg
             metrics = self._model_opt(torch.mean(model_loss), self.parameters())
 
         metrics.update({f"{name}_loss": to_np(loss) for name, loss in losses.items()})
@@ -178,6 +196,8 @@ class WorldModel(nn.Module):
         metrics["dyn_loss"] = to_np(dyn_loss)
         metrics["rep_loss"] = to_np(rep_loss)
         metrics["kl"] = to_np(torch.mean(kl_value))
+        if boundary_kl is not None:
+            metrics["boundary_kl"] = to_np(torch.mean(boundary_kl))
         with torch.cuda.amp.autocast(self._use_amp):
             if self._dynamics_type == 'vta':
                 # VTA-specific metrics

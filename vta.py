@@ -154,6 +154,7 @@ class VTA(nn.Module):
         max_seg_len=10,
         max_seg_num=5,
         boundary_temp=1.0,
+        boundary_force_scale=10.0,
         act="SiLU",
         norm=True,
         min_std=0.1,
@@ -179,6 +180,7 @@ class VTA(nn.Module):
         self._max_seg_len = max_seg_len
         self._max_seg_num = max_seg_num
         self._boundary_temp = boundary_temp
+        self._boundary_force_scale = boundary_force_scale
         
         # Feature sizes
         self._abs_feat_size = abs_belief + abs_stoch
@@ -386,26 +388,31 @@ class VTA(nn.Module):
     
     def _regularize_boundary(self, log_alpha, seg_len, seg_num):
         """Regularize boundary logits based on segment constraints."""
-        # High probability values
-        max_scale = 10.0
-        
-        # Force READ if segment too long
-        over_len = (seg_len >= self._max_seg_len).float()
-        force_read = torch.stack([
-            torch.ones_like(seg_len) * max_scale,
-            torch.ones_like(seg_len) * -max_scale,
-        ], dim=-1).squeeze(-2)
-        
-        # Force COPY if too many segments
-        over_num = (seg_num >= self._max_seg_num).float()
-        force_copy = torch.stack([
-            torch.ones_like(seg_len) * -max_scale,
-            torch.ones_like(seg_len) * max_scale,
-        ], dim=-1).squeeze(-2)
-        
-        # Apply constraints
-        log_alpha = over_len * force_read + (1 - over_len) * log_alpha
-        log_alpha = over_num * force_copy + (1 - over_num) * log_alpha
+        max_scale = float(self._boundary_force_scale)
+        if max_scale > 0.0:
+            # Force READ if segment too long
+            over_len = (seg_len >= self._max_seg_len).float()
+            force_read = torch.stack(
+                [
+                    torch.ones_like(seg_len) * max_scale,
+                    torch.ones_like(seg_len) * -max_scale,
+                ],
+                dim=-1,
+            ).squeeze(-2)
+
+            # Force COPY if too many segments
+            over_num = (seg_num >= self._max_seg_num).float()
+            force_copy = torch.stack(
+                [
+                    torch.ones_like(seg_len) * -max_scale,
+                    torch.ones_like(seg_len) * max_scale,
+                ],
+                dim=-1,
+            ).squeeze(-2)
+
+            # Apply constraints
+            log_alpha = over_len * force_read + (1 - over_len) * log_alpha
+            log_alpha = over_num * force_copy + (1 - over_num) * log_alpha
         
         return log_alpha
     

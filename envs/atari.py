@@ -1,7 +1,32 @@
 import gymnasium as gym
-import ale_py
-gym.register_envs(ale_py)
 import numpy as np
+
+# Ensure ALE envs are registered (gymnasium[atari] provides these).
+try:
+    import gymnasium.envs.atari  # noqa: F401
+except ModuleNotFoundError:
+    pass
+
+try:
+    import ale_py
+    gym.register_envs(ale_py)
+except ModuleNotFoundError:
+    ale_py = None
+
+
+def _require_ale_env(env_id):
+    try:
+        gym.spec(env_id)
+    except Exception as e:
+        raise RuntimeError(
+            "ALE envs are not registered. Install `gymnasium[atari]` and run "
+            "`AutoROM --accept-license` (or set `ALE_PY_ROM_DIR`)."
+        ) from e
+
+
+def _is_rom_error(err):
+    msg = str(err).lower()
+    return "rom" in msg and ("not found" in msg or "missing" in msg)
 
 
 class Atari:
@@ -56,15 +81,29 @@ class Atari:
         game_name = name.title().replace("_", "")
         env_id = f"ALE/{game_name}-v5"
         
+        _require_ale_env(env_id)
         with self.LOCK:
-            self._env = gym.make(
-                env_id,
-                obs_type="rgb",
-                frameskip=1,
-                repeat_action_probability=0.25 if sticky else 0.0,
-                full_action_space=(actions == "all"),
-                render_mode=None,
-            )
+            try:
+                self._env = gym.make(
+                    env_id,
+                    obs_type="rgb",
+                    frameskip=1,
+                    repeat_action_probability=0.25 if sticky else 0.0,
+                    full_action_space=(actions == "all"),
+                    render_mode=None,
+                )
+            except FileNotFoundError as e:
+                raise RuntimeError(
+                    "Atari ROMs not found. Run `AutoROM --accept-license` "
+                    "(or set `ALE_PY_ROM_DIR`)."
+                ) from e
+            except Exception as e:
+                if _is_rom_error(e):
+                    raise RuntimeError(
+                        "Atari ROMs not found. Run `AutoROM --accept-license` "
+                        "(or set `ALE_PY_ROM_DIR`)."
+                    ) from e
+                raise
         
         self._ale = self._env.unwrapped.ale
         

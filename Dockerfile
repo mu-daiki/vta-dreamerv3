@@ -38,3 +38,6 @@ COPY requirements.txt .
 
 # Install requiremqnts
 RUN pip3 install -r requirements.txt
+
+# Atari ROMs (required for ALE/*-v5 environments)
+RUN AutoROM --accept-license
