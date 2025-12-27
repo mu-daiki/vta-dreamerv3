@@ -506,14 +506,17 @@ class VTA(nn.Module):
             is_first_action = is_first_flat.expand_as(prev_action)
             prev_action = prev_action * (1.0 - is_first_action)
         
-        # Get boundary decision
+        # Get prior boundary decision (always compute for kl_mask)
+        obs_feat = self._get_obs_feat(prev_state)
+        prior_boundary_logit = self.prior_boundary(obs_feat)
+        
+        # Get boundary decision for sampling
         if post_boundary_logit is not None:
             # Use posterior boundary (training)
             boundary_logit = post_boundary_logit
         else:
             # Use prior boundary (inference)
-            obs_feat = self._get_obs_feat(prev_state)
-            boundary_logit = self.prior_boundary(obs_feat)
+            boundary_logit = prior_boundary_logit
         
         # Regularize and sample boundary
         boundary_logit = self._regularize_boundary(
@@ -584,6 +587,7 @@ class VTA(nn.Module):
             prior_obs_stoch = prior_obs_dist.mean
         
         # Build output states
+        # post uses post_boundary_logit, prior uses prior_boundary_logit
         post = {
             "abs_belief": abs_belief,
             "abs_stoch": abs_stoch,
@@ -594,10 +598,15 @@ class VTA(nn.Module):
             "obs_mean": post_obs_stats["mean"],
             "obs_std": post_obs_stats["std"],
             "boundary": read_mask,
-            "boundary_logit": boundary_logit,
+            "boundary_logit": boundary_logit,  # post boundary logit (regularized)
             "seg_len": seg_len,
             "seg_num": seg_num,
         }
+        
+        # Regularize prior boundary logit for storing
+        prior_boundary_logit_reg = self._regularize_boundary(
+            prior_boundary_logit, prev_state["seg_len"], prev_state["seg_num"]
+        )
         
         prior = {
             "abs_belief": abs_belief,
@@ -609,7 +618,7 @@ class VTA(nn.Module):
             "obs_mean": prior_obs_stats["mean"],
             "obs_std": prior_obs_stats["std"],
             "boundary": read_mask,
-            "boundary_logit": boundary_logit,
+            "boundary_logit": prior_boundary_logit_reg,  # prior boundary logit (regularized)
             "seg_len": seg_len,
             "seg_num": seg_num,
         }
@@ -786,7 +795,7 @@ class VTA(nn.Module):
         priors = {k: swap(torch.stack(v, dim=0)) for k, v in priors.items()}
         return priors
     
-    def kl_loss(self, post, prior, free, dyn_scale, rep_scale):
+    def kl_loss(self, post, prior, free, dyn_scale, rep_scale, mask_scale=1.0):
         """
         Compute KL divergence losses for hierarchical model.
         
@@ -795,6 +804,7 @@ class VTA(nn.Module):
             value: KL value for logging
             dyn_loss: dynamics loss
             rep_loss: representation loss
+            kl_mask: boundary KL loss (for mask encoder learning)
         """
         kld = torchd.kl.kl_divergence
         
@@ -838,9 +848,33 @@ class VTA(nn.Module):
         dyn_loss = boundary.squeeze(-1) * dyn_abs_kl + dyn_obs_kl
         dyn_loss = torch.clip(dyn_loss, min=free)
         
-        loss = dyn_scale * dyn_loss + rep_scale * rep_loss
+        # ========================
+        # KL Mask: Boundary KL divergence
+        # ========================
+        # KL between posterior boundary and prior boundary distributions
+        # This trains the prior boundary detector to match the posterior
+        # KL(q(b|x_{1:T}) || p(b|s_{t-1}))
+        post_boundary_logit = post["boundary_logit"]  # (batch, time, 2) or (batch, 2)
+        prior_boundary_logit = prior["boundary_logit"]  # (batch, time, 2) or (batch, 2)
         
-        return loss, kl_value, dyn_loss, rep_loss
+        # Convert logits to probabilities (softmax)
+        post_boundary_prob = F.softmax(post_boundary_logit, dim=-1)
+        prior_boundary_prob = F.softmax(prior_boundary_logit.detach(), dim=-1)  # detach prior for rep_loss
+        
+        # KL divergence for categorical: sum(p * log(p/q))
+        eps = 1e-8
+        kl_mask = (post_boundary_prob * (torch.log(post_boundary_prob + eps) - torch.log(prior_boundary_prob + eps))).sum(dim=-1)
+        
+        # Also compute dynamics version (prior learning)
+        prior_boundary_prob_dyn = F.softmax(prior_boundary_logit, dim=-1)
+        post_boundary_prob_sg = F.softmax(post_boundary_logit.detach(), dim=-1)  # detach post for dyn_loss
+        kl_mask_dyn = (post_boundary_prob_sg * (torch.log(post_boundary_prob_sg + eps) - torch.log(prior_boundary_prob_dyn + eps))).sum(dim=-1)
+        
+        # Add mask KL to losses
+        # mask_scale controls the weight of the boundary KL term
+        loss = dyn_scale * dyn_loss + rep_scale * rep_loss + mask_scale * kl_mask_dyn
+        
+        return loss, kl_value, dyn_loss, rep_loss, kl_mask
 
 
 class GRUCell(nn.Module):

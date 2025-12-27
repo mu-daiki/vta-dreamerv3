@@ -73,6 +73,7 @@ defaults:
   vta_boundary_force_scale: 10.0 # Hard forcing strength at segment limits (0 disables)
   vta_imag_type: 'full'  # 'jumpy' (abstract only) or 'full' (both levels)
   vta_imag_boundary: 'prior'  # 'prior', 'fixed', or 'none'
+  vta_mask_scale: 1.0  # weight for kl_mask loss (trains Prior BD to match Post BD)
   vta_boundary_rate: 0.0  # target READ rate for boundary prior (0 disables)
   vta_boundary_scale: 0.0 # weight for boundary prior loss
 

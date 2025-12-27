@@ -297,6 +297,8 @@ def main():
     wm = models.WorldModel(obs_space, act_space, step=0, config=config).to(device)
     state = torch.load(ckpt_path, map_location=device)["agent_state_dict"]
     wm_state = {k[len("_wm."):]: v for k, v in state.items() if k.startswith("_wm.")}
+    # Remove _orig_mod. prefix from torch.compile() saved checkpoints
+    wm_state = {k.replace("_orig_mod.", ""): v for k, v in wm_state.items()}
     wm.load_state_dict(wm_state, strict=True)
 
     data = {

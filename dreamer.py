@@ -224,6 +224,18 @@ def main(config):
     logdir.mkdir(parents=True, exist_ok=True)
     config.traindir.mkdir(parents=True, exist_ok=True)
     config.evaldir.mkdir(parents=True, exist_ok=True)
+    
+    # Save training configuration
+    config_path = logdir / "config.yaml"
+    config_dict = vars(config).copy()
+    # Convert pathlib.Path objects to strings for YAML serialization
+    for key, value in config_dict.items():
+        if isinstance(value, pathlib.Path):
+            config_dict[key] = str(value)
+    with open(config_path, "w") as f:
+        yaml.dump(config_dict, f, default_flow_style=False)
+    print(f"Config saved to {config_path}")
+    
     step = count_steps(config.traindir)
     # step in logger is environmental step
     logger = tools.Logger(logdir, config.action_repeat * step)

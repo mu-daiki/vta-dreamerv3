@@ -146,9 +146,19 @@ class WorldModel(nn.Module):
                 kl_free = self._config.kl_free
                 dyn_scale = self._config.dyn_scale
                 rep_scale = self._config.rep_scale
-                kl_loss, kl_value, dyn_loss, rep_loss = self.dynamics.kl_loss(
-                    post, prior, kl_free, dyn_scale, rep_scale
-                )
+                
+                # VTA returns additional kl_mask value
+                if self._dynamics_type == 'vta':
+                    mask_scale = getattr(self._config, 'vta_mask_scale', 1.0)
+                    kl_loss, kl_value, dyn_loss, rep_loss, kl_mask = self.dynamics.kl_loss(
+                        post, prior, kl_free, dyn_scale, rep_scale, mask_scale
+                    )
+                else:
+                    kl_loss, kl_value, dyn_loss, rep_loss = self.dynamics.kl_loss(
+                        post, prior, kl_free, dyn_scale, rep_scale
+                    )
+                    kl_mask = None
+                
                 assert kl_loss.shape == embed.shape[:2], kl_loss.shape
                 boundary_reg = 0.0
                 boundary_kl = None
@@ -215,6 +225,9 @@ class WorldModel(nn.Module):
                 )
                 # Boundary ratio (how often boundaries are detected)
                 metrics["boundary_ratio"] = to_np(torch.mean(post["boundary"]))
+                # Boundary KL (kl_mask) - measures how well prior boundary matches posterior
+                if kl_mask is not None:
+                    metrics["kl_mask"] = to_np(torch.mean(kl_mask))
                 context = dict(
                     embed=embed,
                     feat=self.dynamics.get_feat(post),
