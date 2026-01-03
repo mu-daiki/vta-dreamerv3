@@ -56,6 +56,7 @@ class WorldModel(nn.Module):
                 num_actions=config.num_actions,
                 embed_size=self.embed_size,
                 device=config.device,
+                vta_posterior_input=getattr(config, 'vta_posterior_input', 'embed'),
             )
             feat_size = self.dynamics.feat_size
         else:
@@ -141,7 +142,7 @@ class WorldModel(nn.Module):
             with torch.cuda.amp.autocast(self._use_amp):
                 embed = self.encoder(data)
                 post, prior = self.dynamics.observe(
-                    embed, data["action"], data["is_first"]
+                    embed, data["action"], data["is_first"], reward=data["reward"]
                 )
                 kl_free = self._config.kl_free
                 dyn_scale = self._config.dyn_scale
@@ -273,7 +274,8 @@ class WorldModel(nn.Module):
         embed = self.encoder(data)
 
         states, _ = self.dynamics.observe(
-            embed[:6, :5], data["action"][:6, :5], data["is_first"][:6, :5]
+            embed[:6, :5], data["action"][:6, :5], data["is_first"][:6, :5],
+            reward=data["reward"][:6, :5] if "reward" in data else None
         )
         recon = self.heads["decoder"](self.dynamics.get_feat(states))["image"].mode()[
             :6

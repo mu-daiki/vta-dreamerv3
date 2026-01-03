@@ -67,8 +67,8 @@ defaults:
   vta_abs_stoch: 32      # Abstract stochastic size
   vta_obs_belief: 512    # Observation belief size
   vta_obs_stoch: 32      # Observation stochastic size
-  vta_max_seg_len: 10    # Maximum segment length before forced boundary
-  vta_max_seg_num: 10    # Maximum number of segments
+  vta_max_seg_len: 50    # Maximum segment length before forced boundary
+  vta_max_seg_num: 200    # Maximum number of segments
   vta_boundary_temp: 1.0 # Gumbel-softmax temperature for boundary sampling
   vta_boundary_force_scale: 10.0 # Hard forcing strength at segment limits (0 disables)
   vta_imag_type: 'full'  # 'jumpy' (abstract only) or 'full' (both levels)
@@ -76,6 +76,7 @@ defaults:
   vta_mask_scale: 1.0  # weight for kl_mask loss (trains Prior BD to match Post BD)
   vta_boundary_rate: 0.0  # target READ rate for boundary prior (0 disables)
   vta_boundary_scale: 0.0 # weight for boundary prior loss
+  vta_posterior_input: 'embed' # 'embed' or 'embed_reward'
 
   # Training
   batch_size: 16

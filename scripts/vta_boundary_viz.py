@@ -60,8 +60,17 @@ def compute_vta_stats(wm, data):
     with torch.no_grad():
         proc = wm.preprocess(data)
         embed = wm.encoder(proc)
-        post, prior = wm.dynamics.observe(embed, proc["action"], proc["is_first"])
-        post_logits = wm.dynamics.post_boundary(embed)
+        reward = proc.get("reward", None)
+        post, prior = wm.dynamics.observe(embed, proc["action"], proc["is_first"], reward=reward)
+        
+        # For post_boundary, also need to pass reward if embed_reward mode
+        if hasattr(wm.dynamics, '_posterior_input') and wm.dynamics._posterior_input == 'embed_reward' and reward is not None:
+            # Concatenate reward to embed for post_boundary
+            reward_inp = reward.unsqueeze(-1)  # (batch, time, 1)
+            post_inp = torch.cat([embed, reward_inp], dim=-1)
+            post_logits = wm.dynamics.post_boundary(post_inp)
+        else:
+            post_logits = wm.dynamics.post_boundary(embed)
         post_probs = torch.softmax(post_logits, dim=-1)[..., 0]
 
         post_abs = torchd.normal.Normal(post["abs_mean"], post["abs_std"])
@@ -307,6 +316,8 @@ def main():
         "is_first": is_first[None],
         "is_terminal": is_terminal[None],
     }
+    if reward is not None:
+        data["reward"] = reward[None]
     if discount is not None:
         data["discount"] = discount[None]
 

@@ -161,6 +161,7 @@ class VTA(nn.Module):
         num_actions=None,
         embed_size=None,
         device=None,
+        vta_posterior_input='embed',
     ):
         super().__init__()
         
@@ -191,14 +192,22 @@ class VTA(nn.Module):
         # ========================
         # Boundary Detectors
         # ========================
+        # ========================
+        # Boundary Detectors
+        # ========================
         self.prior_boundary = PriorBoundaryDetector(
             input_size=self._obs_feat_size,
             hidden_size=hidden,
             act=act,
             norm=norm,
         )
+        self._posterior_input = vta_posterior_input if vta_posterior_input else 'embed'
+        post_input_size = embed_size
+        if self._posterior_input == 'embed_reward':
+            post_input_size += 1
+
         self.post_boundary = PostBoundaryDetector(
-            input_size=embed_size,
+            input_size=post_input_size,
             hidden_size=hidden,
             num_layers=num_layers,
             act=act,
@@ -416,7 +425,7 @@ class VTA(nn.Module):
         
         return log_alpha
     
-    def observe(self, embed, action, is_first, state=None):
+    def observe(self, embed, action, is_first, state=None, reward=None):
         """
         Process observation sequence with boundary detection (training).
         
@@ -425,6 +434,7 @@ class VTA(nn.Module):
             action: (batch, time, action_size) actions
             is_first: (batch, time, 1) episode start flags
             state: optional initial state
+            reward: (batch, time) optional reward sequence
             
         Returns:
             post: posterior states dict
@@ -438,7 +448,15 @@ class VTA(nn.Module):
         embed, action, is_first = swap(embed), swap(action), swap(is_first)
         
         # Get posterior boundary predictions for full sequence
-        post_boundary_logits = self.post_boundary(swap(embed))  # (batch, time, 2)
+        # Prepare input for posterior boundary
+        if self._posterior_input == 'embed_reward' and reward is not None:
+             # reward: (batch, time) -> (batch, time, 1) -> swap -> (time, batch, 1)
+            reward_inp = swap(reward).unsqueeze(-1)
+            post_inp = torch.cat([embed, reward_inp], dim=-1)
+        else:
+            post_inp = embed
+
+        post_boundary_logits = self.post_boundary(swap(post_inp))  # (batch, time, 2)
         post_boundary_logits = swap(post_boundary_logits)  # (time, batch, 2)
         
         # Initialize state if needed
